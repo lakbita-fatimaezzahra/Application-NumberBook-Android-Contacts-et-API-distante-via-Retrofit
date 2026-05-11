@@ -27,112 +27,246 @@ import retrofit2.Response;
 
 public class MainActivity extends AppCompatActivity {
 
-    private Button btnLoadContacts, btnSyncContacts, btnSearch;
-    private EditText etKeyword;
-    private RecyclerView recyclerViewContacts;
-    private ContactAdapter adapter;
-    private List<Contact> contactList = new ArrayList<>();
-    private ContactApi contactApi;
+    private Button btnImport;
+    private Button btnUpload;
+    private Button btnFind;
+
+    private EditText inputSearch;
+
+    private RecyclerView recyclerNumbers;
+
+    private PhoneListAdapter phoneAdapter;
+
+    private List<PersonData> numberCollection = new ArrayList<>();
+
+    private PhoneService phoneService;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
         super.onCreate(savedInstanceState);
+
         setContentView(R.layout.activity_main);
 
-        btnLoadContacts = findViewById(R.id.btnLoadContacts);
-        btnSyncContacts = findViewById(R.id.btnSyncContacts);
-        btnSearch = findViewById(R.id.btnSearch);
-        etKeyword = findViewById(R.id.etKeyword);
-        recyclerViewContacts = findViewById(R.id.recyclerViewContacts);
+        btnImport = findViewById(R.id.btnLoadContacts);
+        btnUpload = findViewById(R.id.btnSyncContacts);
+        btnFind = findViewById(R.id.btnSearch);
 
-        recyclerViewContacts.setLayoutManager(new LinearLayoutManager(this));
-        adapter = new ContactAdapter(contactList);
-        recyclerViewContacts.setAdapter(adapter);
+        inputSearch = findViewById(R.id.etKeyword);
 
-        contactApi = RetrofitClient.getClient().create(ContactApi.class);
+        recyclerNumbers = findViewById(R.id.recyclerViewContacts);
 
-        // Charger les données du serveur au démarrage
-        loadContactsFromServer();
+        recyclerNumbers.setLayoutManager(
+                new LinearLayoutManager(this)
+        );
 
-        btnLoadContacts.setOnClickListener(v -> checkPermissionAndLoadContacts());
-        btnSyncContacts.setOnClickListener(v -> syncContactsToServer());
-        btnSearch.setOnClickListener(v -> searchContacts());
+        phoneAdapter = new PhoneListAdapter(numberCollection);
+
+        recyclerNumbers.setAdapter(phoneAdapter);
+
+        phoneService = ApiManager
+                .buildConnection()
+                .create(PhoneService.class);
+
+        retrieveServerContacts();
+
+        btnImport.setOnClickListener(v -> verifyPermission());
+
+        btnUpload.setOnClickListener(v -> uploadContacts());
+
+        btnFind.setOnClickListener(v -> executeSearch());
     }
 
-    private void loadContactsFromServer() {
-        contactApi.getAllContacts().enqueue(new Callback<List<Contact>>() {
-            @Override
-            public void onResponse(@NonNull Call<List<Contact>> call, @NonNull Response<List<Contact>> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    contactList.clear();
-                    contactList.addAll(response.body());
-                    adapter.notifyDataSetChanged();
-                }
-            }
+    private void retrieveServerContacts() {
 
-            @Override
-            public void onFailure(@NonNull Call<List<Contact>> call, @NonNull Throwable t) {
-                Log.e("API_ERROR", t.getMessage());
-                Toast.makeText(MainActivity.this, "Serveur injoignable", Toast.LENGTH_SHORT).show();
-            }
-        });
+        phoneService.fetchStoredNumbers()
+                .enqueue(new Callback<List<PersonData>>() {
+
+                    @Override
+                    public void onResponse(
+                            @NonNull Call<List<PersonData>> call,
+                            @NonNull Response<List<PersonData>> response
+                    ) {
+
+                        if (response.isSuccessful()
+                                && response.body() != null) {
+
+                            numberCollection.clear();
+
+                            numberCollection.addAll(response.body());
+
+                            phoneAdapter.notifyDataSetChanged();
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(
+                            @NonNull Call<List<PersonData>> call,
+                            @NonNull Throwable t
+                    ) {
+
+                        Log.e("SERVER_FAIL", t.getMessage());
+
+                        Toast.makeText(
+                                MainActivity.this,
+                                "Connexion impossible",
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                });
     }
 
-    private void checkPermissionAndLoadContacts() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS)
-                == PackageManager.PERMISSION_GRANTED) {
-            loadLocalContacts();
+    private void verifyPermission() {
+
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED) {
+
+            importDeviceContacts();
+
         } else {
-            requestPermissionLauncher.launch(Manifest.permission.READ_CONTACTS);
+
+            permissionLauncher.launch(
+                    Manifest.permission.READ_CONTACTS
+            );
         }
     }
 
-    private final ActivityResultLauncher<String> requestPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
-                if (isGranted) loadLocalContacts();
-            });
+    private final ActivityResultLauncher<String>
+            permissionLauncher =
 
-    private void loadLocalContacts() {
-        contactList.clear();
-        Cursor cursor = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, null);
-        if (cursor != null) {
-            while (cursor.moveToNext()) {
-                String name = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
-                String phone = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER));
-                contactList.add(new Contact(name, phone));
+            registerForActivityResult(
+                    new ActivityResultContracts.RequestPermission(),
+
+                    granted -> {
+
+                        if (granted) {
+
+                            importDeviceContacts();
+                        }
+                    });
+
+    private void importDeviceContacts() {
+
+        numberCollection.clear();
+
+        Cursor dataCursor = getContentResolver().query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                null,
+                null,
+                null,
+                null
+        );
+
+        if (dataCursor != null) {
+
+            while (dataCursor.moveToNext()) {
+
+                String personName =
+                        dataCursor.getString(
+                                dataCursor.getColumnIndexOrThrow(
+                                        ContactsContract
+                                                .CommonDataKinds
+                                                .Phone
+                                                .DISPLAY_NAME
+                                )
+                        );
+
+                String personPhone =
+                        dataCursor.getString(
+                                dataCursor.getColumnIndexOrThrow(
+                                        ContactsContract
+                                                .CommonDataKinds
+                                                .Phone
+                                                .NUMBER
+                                )
+                        );
+
+                numberCollection.add(
+                        new PersonData(personName, personPhone)
+                );
             }
-            cursor.close();
+
+            dataCursor.close();
         }
-        adapter.notifyDataSetChanged();
-        Toast.makeText(this, "Contacts du téléphone chargés", Toast.LENGTH_SHORT).show();
+
+        phoneAdapter.notifyDataSetChanged();
+
+        Toast.makeText(
+                this,
+                "Contacts importés",
+                Toast.LENGTH_SHORT
+        ).show();
     }
 
-    private void syncContactsToServer() {
-        for (Contact contact : contactList) {
-            contactApi.insertContact(contact).enqueue(new Callback<ApiResponse>() {
-                @Override public void onResponse(Call<ApiResponse> call, Response<ApiResponse> response) {}
-                @Override public void onFailure(Call<ApiResponse> call, Throwable t) {}
-            });
+    private void uploadContacts() {
+
+        for (PersonData item : numberCollection) {
+
+            phoneService.saveNumber(item)
+                    .enqueue(new Callback<ServerReply>() {
+
+                        @Override
+                        public void onResponse(
+                                Call<ServerReply> call,
+                                Response<ServerReply> response
+                        ) {
+                        }
+
+                        @Override
+                        public void onFailure(
+                                Call<ServerReply> call,
+                                Throwable t
+                        ) {
+                        }
+                    });
         }
-        Toast.makeText(this, "Synchronisation terminée", Toast.LENGTH_SHORT).show();
+
+        Toast.makeText(
+                this,
+                "Envoi terminé",
+                Toast.LENGTH_SHORT
+        ).show();
     }
 
-    private void searchContacts() {
-        String keyword = etKeyword.getText().toString().trim();
-        contactApi.searchContacts(keyword).enqueue(new Callback<List<Contact>>() {
-            @Override
-            public void onResponse(@NonNull Call<List<Contact>> call, @NonNull Response<List<Contact>> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    contactList.clear();
-                    contactList.addAll(response.body());
-                    adapter.notifyDataSetChanged();
-                }
-            }
+    private void executeSearch() {
 
-            @Override
-            public void onFailure(@NonNull Call<List<Contact>> call, @NonNull Throwable t) {
-                Toast.makeText(MainActivity.this, "Erreur recherche", Toast.LENGTH_SHORT).show();
-            }
-        });
+        String enteredKeyword =
+                inputSearch.getText().toString().trim();
+
+        phoneService.findNumber(enteredKeyword)
+                .enqueue(new Callback<List<PersonData>>() {
+
+                    @Override
+                    public void onResponse(
+                            @NonNull Call<List<PersonData>> call,
+                            @NonNull Response<List<PersonData>> response
+                    ) {
+
+                        if (response.isSuccessful()
+                                && response.body() != null) {
+
+                            numberCollection.clear();
+
+                            numberCollection.addAll(response.body());
+
+                            phoneAdapter.notifyDataSetChanged();
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(
+                            @NonNull Call<List<PersonData>> call,
+                            @NonNull Throwable t
+                    ) {
+
+                        Toast.makeText(
+                                MainActivity.this,
+                                "Recherche impossible",
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                });
     }
 }
